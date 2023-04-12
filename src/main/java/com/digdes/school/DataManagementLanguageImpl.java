@@ -58,9 +58,6 @@ public class DataManagementLanguageImpl {
     private Map<String, Object> getRowWithNewValues(String request) throws Exception {
         Map<String, Object> newRow = new HashMap<>();
         Matcher pairRgxM = Pattern.compile(pairRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(request);
-        if (pairRgxM.groupCount() > columnNum) {
-            throw new Exception("Неккоректный запрос - новых значений для колонок больше, чем количество колонок.");
-        }
         while (pairRgxM.find()) {
             String newPair = pairRgxM.group();
             Matcher columnM = Pattern.compile(columnNameRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(newPair);
@@ -103,7 +100,6 @@ public class DataManagementLanguageImpl {
             for (int i = 0; i < table.size(); i++) {
                 Map<String, Object> map = table.get(i);
                 if (mapIndexesToUpdate.contains(i)) {
-                    System.out.println("contains");
                     map.putAll(newValuesRow);
                     updatedRows.add(map);
                 }
@@ -158,7 +154,6 @@ public class DataManagementLanguageImpl {
                     valTemplate = valTemplate.substring(0, valTemplate.length() - 1) + ".*";
                 }
                 String finalValTemplate = comparisonOp.equalsIgnoreCase("ilike") ? "(?iu)" + valTemplate : valTemplate;
-                System.out.println("finalValTemplate = " + finalValTemplate);
 
                 indexesFinder = (set) -> strFilter(set, column, finalValTemplate);
 
@@ -228,7 +223,7 @@ public class DataManagementLanguageImpl {
             Map<String, Object> map = table.get(i);
             Object arg1 = map.get(column);
             if (arg1 != null && applyOperator(op, arg1,
-                    columnsTypes.get(column).getName().equals(Double.class.getName()),  //todo как вытащить класс в преобразование сразу?
+                    columnsTypes.get(column).getName().equals(Double.class.getName()),
                     val)) {
                 indexes.add(i);
             }
@@ -320,7 +315,7 @@ public class DataManagementLanguageImpl {
             if (regex != null) {
                 System.err.println(request.matches(regex));
             }
-            throw new Exception("Некорректный запрос: " + request);   // todo
+            throw new Exception("Некорректный запрос: " + request);
         }
     }
 

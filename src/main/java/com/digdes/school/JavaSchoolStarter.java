@@ -58,7 +58,7 @@ public class JavaSchoolStarter {
     private REQUEST_TYPE getRequestType(String request) {
         Pattern p = Pattern.compile("INSERT|UPDATE|DELETE|SELECT", Pattern.CASE_INSENSITIVE);
         Matcher m = p.matcher(request);
-        m.find();   // todo прокинуть исключение если false
+        m.find();
         return REQUEST_TYPE.valueOf(m.group().toUpperCase());
     }
 
