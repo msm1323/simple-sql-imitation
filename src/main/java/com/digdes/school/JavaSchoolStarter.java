@@ -1,6 +1,5 @@
 package com.digdes.school;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -12,7 +11,7 @@ public class JavaSchoolStarter {
     public JavaSchoolStarter() {
     }
 
-    public void init(Map<String, Class<?>> columnsTypes) throws Exception {
+    public void init(Map<String, Class<?>> columnsTypes) throws Exception { // todo или ловеркейсить насильно пришедшие данные?
         for (Map.Entry<String, Class<?>> entry : columnsTypes.entrySet()) {
             if (!entry.getValue().getSimpleName().matches("Long|Double|Boolean|String")) {
                 throw new Exception("Непподерживаемый тип значений для колонки: " + entry.getValue().getName());
@@ -22,18 +21,6 @@ public class JavaSchoolStarter {
     }
 
     public List<Map<String, Object>> execute(String request) throws Exception {
-        //  костыль для использования класса JavaSchoolStarter без init метода на таблице из тз_______start________
-        if (dml == null) {
-            Map<String, Class<?>> columnsTypes = new HashMap<>(5);
-            columnsTypes.put("id", Long.class);
-            columnsTypes.put("lastname", String.class);
-            columnsTypes.put("age", Long.class);
-            columnsTypes.put("cost", Double.class);
-            columnsTypes.put("active", Boolean.class);
-            init(columnsTypes);
-        }
-        //  костыль для использования класса JavaSchoolStarter без init метода_________________end_________________
-
         try {
             switch (getRequestType(request)) {
                 case INSERT:

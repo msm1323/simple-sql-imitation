@@ -10,10 +10,7 @@ public class App {
      * Комментарии к реализации:
      * - при инициализации таблицы имена колонок задаются в нижнем регистре
      * - в имени колонки и строковых значениях не может быть символа одинарной кавычки
-     * - поддерживается только один вид логического оператора в выражении  // todo
-     *
-     * Также предусмотрен костыль на случий юнит тестов для метода execute(String request)
-     * с вашей стороны - автоинициализация таблицы колонками из примера
+     * - не поддерживаются скобки
      */
 
     public static void main(String[] args) {
@@ -38,7 +35,7 @@ public class App {
             System.out.println(result3);
 
             //Изменение значения которое выше записывали
-            List<Map<String, Object>> result4 = starter.execute("UPDATE VALUES 'active'=false, 'cost'=10.1 where 'cost' > 5 and 'active'=true" );
+            List<Map<String, Object>> result4 = starter.execute("UPDATE VALUES 'active'=false, 'cost'=10.1 where 'cost' > 5 or 'active'=true");
             System.out.println("result4 = " + result4);
 
             //Получение всех данных из коллекции (т.е. в данном примере вернется 1 запись)
@@ -46,7 +43,11 @@ public class App {
             System.out.println("result5 = " + result5);
 
             List<Map<String, Object>> result6 = starter.execute("delete where 'cost' = 10.1");
+//            List<Map<String, Object>> result6 = starter.execute("delete ");
             System.out.println("result6 = " + result6);
+
+            List<Map<String, Object>> result7 = starter.execute("INSERT VALUES 'lastName' = 'Попов' , 'id'=8, 'age'=48, 'active'=true");
+            System.out.println("result7 = " + result7);
 
             System.out.println();
             starter.printTable();

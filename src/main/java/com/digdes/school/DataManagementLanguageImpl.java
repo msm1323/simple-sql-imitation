@@ -6,18 +6,20 @@ import java.util.regex.Pattern;
 
 public class DataManagementLanguageImpl {
 
-    private Map<String, Class<?>> columnsTypes;
-    private final long columnNum;
-    private List<Map<String, Object>> table;
+    private final Map<String, Class<?>> columnsTypes;
+    private final List<Map<String, Object>> table;
 
-    String columnNameRgx, columnValueRgx, pairRgx, valuesRgx, whereRgx, conditionRgx;
+    String insertRgx, updateRgx, selectRgx, deleteRgx;
+    String columnNameRgx, columnValueRgx, pairRgx, valuesRgx, conditionRgx, subConditionRgx;
     String comparisonPairRgx, comparisonStringPairRgx, comparisonDigitPairRgx;
-    String stringValueRgx, digitValueRgx, boolValueRgx;
+    String stringValueRgx, digitValueRgx, longValueRgx, boolValueRgx;
     String logicalOpsRgx, comparisonOpsRgx;
 
     {
+
         stringValueRgx = "'[^']+'";
         digitValueRgx = "\\d+(\\.\\d+)?";
+        longValueRgx = "\\d+";
         boolValueRgx = "(true|false)";
 
         columnNameRgx = "'[^']+'";
@@ -31,296 +33,288 @@ public class DataManagementLanguageImpl {
         comparisonStringPairRgx = columnNameRgx + "\\s*i?like\\s*" + stringValueRgx;
         comparisonDigitPairRgx = columnNameRgx + "\\s*(>|<)=?\\s*" + digitValueRgx;
 
-        conditionRgx = String.format("(%s|%s|%s)", comparisonPairRgx, comparisonStringPairRgx, comparisonDigitPairRgx);
-        whereRgx = "(\\s+where\\s+" + conditionRgx + "(\\s+" + logicalOpsRgx + "\\s+" + conditionRgx + ")*)?\\s*";
+        subConditionRgx = String.format("(%s|%s|%s)", comparisonPairRgx, comparisonStringPairRgx, comparisonDigitPairRgx);
+        conditionRgx = "\\s+where\\s+" + subConditionRgx + "(\\s+" + logicalOpsRgx + "\\s+" + subConditionRgx + ")*";
+
     }
 
     DataManagementLanguageImpl(Map<String, Class<?>> columnsTypes) {
         this.columnsTypes = columnsTypes;
-        this.columnNum = columnsTypes.size();
-        valuesRgx = "\\s+values\\s+" + pairRgx + "(\\s*,\\s*" + pairRgx + "){0," + (columnNum - 1) + "}\\s*";
+        valuesRgx = "\\s+values\\s+" + pairRgx + "(\\s*,\\s*" + pairRgx + "){0," + (columnsTypes.size() - 1) + "}\\s*";
+        insertRgx = "(?iu)\\s*INSERT" + valuesRgx;
+        updateRgx = "(?iu)\\s*UPDATE" + valuesRgx + "(" + conditionRgx + ")?\\s*";
+        selectRgx = "(?iu)\\s*SELECT" + "(" + conditionRgx + ")?\\s*";
+        deleteRgx = "(?iu)\\s*DELETE" + "(" + conditionRgx + ")?\\s*";
         table = new ArrayList<>();
     }
 
-    public List<Map<String, Object>> insert(String request) throws Exception {
-        validate(request);
-        Map<String, Object> newRow = getRowWithNewValues(request);
+    public List<Map<String, Object>> insert(String query) throws Exception {
+        validateQuery(query, insertRgx);
+        Map<String, Object> newRow = getRowWithNewValues(query);
         table.add(newRow);
         List<Map<String, Object>> insertRes = new ArrayList<>();
         insertRes.add(newRow);
         return insertRes;
     }
 
+    public List<Map<String, Object>> update(String query) throws Exception {
+        validateQuery(query, updateRgx);
+
+        List<Map<String, Object>> updatedRows = new ArrayList<>();
+        Map<String, Object> newValuesRow = getRowWithNewValues(query);
+        if (!hasConditions(query)) {
+            table.forEach(map -> map.putAll(newValuesRow));
+            updatedRows = table;
+            return updatedRows;
+        }
+
+        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        for (Map<String, Object> row : table) {
+            for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
+                int i;
+                for (i = 0; i < subConditionsList.size(); i++) {
+                    if (!conditionFulfillment(row, subConditionsList.get(i))) {
+                        break;
+                    }
+                }
+                if (i == subConditionsList.size()) {
+                    row.putAll(newValuesRow);
+                    updatedRows.add(row);
+                }
+            }
+        }
+        return updatedRows;
+    }
+
+    public List<Map<String, Object>> delete(String query) throws Exception {
+        validateQuery(query, deleteRgx);
+        List<Map<String, Object>> deletedRows = new ArrayList<>();
+        if (!hasConditions(query)) {
+            deletedRows = table;
+            table.clear();
+            return deletedRows;
+        }
+
+        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        ListIterator<Map<String, Object>> it = table.listIterator();
+        while (it.hasNext()) {
+            Map<String, Object> row = it.next();
+            for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
+                int i;
+                for (i = 0; i < subConditionsList.size(); i++) {
+                    if (!conditionFulfillment(row, subConditionsList.get(i))) {
+                        break;
+                    }
+                }
+                if (i == subConditionsList.size()) {
+                    deletedRows.add(row);
+                    it.remove();
+                }
+            }
+        }
+        return deletedRows;
+    }
+
+    public List<Map<String, Object>> select(String query) throws Exception {
+        validateQuery(query, selectRgx);
+
+        if (!hasConditions(query)) {
+            return table;
+        }
+        List<Map<String, Object>> selectedRows = new ArrayList<>();
+        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        for (Map<String, Object> row : table) {
+            for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
+                int i;
+                for (i = 0; i < subConditionsList.size(); i++) {
+                    if (!conditionFulfillment(row, subConditionsList.get(i))) {
+                        break;
+                    }
+                }
+                if (i == subConditionsList.size()) {
+                    selectedRows.add(row);
+                }
+            }
+        }
+        return selectedRows;
+    }
+
+    private List<ArrayList<String>> conditionProcess(String query) {
+        Matcher conditionM = getMatcher(conditionRgx, query);
+        conditionM.find();
+        String condition = conditionM.group();
+        Matcher subConditionM = getMatcher(subConditionRgx, condition);
+        Matcher logOpM = getMatcher(logicalOpsRgx, condition);
+
+        ArrayList<String> logOps = new ArrayList<>();
+        while (logOpM.find()) {
+            logOps.add(logOpM.group());
+        }
+
+        ArrayList<String> subConditions = new ArrayList<>();
+        while (subConditionM.find()) {
+            subConditions.add(subConditionM.group());
+        }
+
+        List<ArrayList<String>> subConditionsListsToSum = new ArrayList<>();
+        ArrayList<String> subConditionsToMultiply = new ArrayList<>();
+
+        subConditionsToMultiply.add(subConditions.get(0));
+        subConditionsListsToSum.add(subConditionsToMultiply);
+        for (int i = 0; i < logOps.size(); i++) {
+            if (logOps.get(i).equalsIgnoreCase("AND")) {
+                subConditionsToMultiply.add(subConditions.get(i + 1));
+            } else {
+                subConditionsToMultiply = new ArrayList<>();
+                subConditionsListsToSum.add(subConditionsToMultiply);
+                subConditionsToMultiply.add(subConditions.get(i + 1));
+            }
+        }
+        return subConditionsListsToSum;
+    }
+
     public void printTable() {
         table.forEach(System.out::println);
     }
 
-    private Map<String, Object> getRowWithNewValues(String request) throws Exception {
+    private Map<String, Object> getRowWithNewValues(String query) throws Exception {
         Map<String, Object> newRow = new HashMap<>();
-        Matcher pairRgxM = Pattern.compile(pairRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(request);
-        if (pairRgxM.groupCount() > columnNum) {
-            throw new Exception("Неккоректный запрос - новых значений для колонок больше, чем количество колонок.");
-        }
+        Matcher valuesM = getMatcher(valuesRgx, query);
+        valuesM.find();
+        String values = valuesM.group();
+        Matcher pairRgxM = getMatcher(pairRgx, values);
         while (pairRgxM.find()) {
-            String newPair = pairRgxM.group();
-            Matcher columnM = Pattern.compile(columnNameRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(newPair);
-            columnM.find();
-            Matcher valueM = Pattern.compile(columnValueRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(newPair.substring(columnM.end()));
-            valueM.find();
-            String column = columnM.group().substring(1, columnM.end() - 1).toLowerCase();
-            String value = valueM.group();
+            String curPair = pairRgxM.group();
 
-            validateColumn(column);
+            String columnName = getColumn(curPair);
+            Object value = getValue(curPair, columnName);
 
-            if (value.equals("null")) {
-                newRow.put(column, null);
-            } else {
-                try {
-                    if (columnsTypes.get(column).getName().equals(Long.class.getName())) {
-                        newRow.put(column, Long.parseLong(value));
-                    } else if (columnsTypes.get(column).getName().equals(Double.class.getName())) {
-                        newRow.put(column, Double.parseDouble(value));
-                    } else {
-                        newRow.put(column, value);
-                    }
-                } catch (NumberFormatException e) {
-                    throw new Exception("Неккоректный запрос - неверный тип значения \"" + value + "\" для колонки '" + column + "'");
-                }
-            }
-
+            newRow.put(columnName, value);
         }
         return newRow;
     }
 
-    public List<Map<String, Object>> update(String request) throws Exception {
-        validate(request);
-
-        List<Map<String, Object>> updatedRows = new ArrayList<>();
-        Map<String, Object> newValuesRow = getRowWithNewValues(request);
-
-        if (hasConditions(request)) {
-            HashSet<Integer> mapIndexesToUpdate = findIndexesToUpdateByConditions(request);
-            for (int i = 0; i < table.size(); i++) {
-                Map<String, Object> map = table.get(i);
-                if (mapIndexesToUpdate.contains(i)) {
-                    System.out.println("contains");
-                    map.putAll(newValuesRow);
-                    updatedRows.add(map);
-                }
-            }
-        } else {
-            table.forEach(map -> map.putAll(newValuesRow));
-            updatedRows = table;
-        }
-        return updatedRows;
-    }
-
-    private boolean hasConditions(String request) {
-        Matcher whereM = Pattern.compile("where", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(request);
+    private boolean hasConditions(String query) { //todo тогда там, где оно есть, будет производится повторный поиск мэтчера
+        Matcher whereM = getMatcher(conditionRgx, query);
         return whereM.find();
     }
 
-    private HashSet<Integer> findIndexesToUpdateByConditions(String request) throws Exception {
-        HashSet<Integer> mapIndexesToUpdate = new HashSet<>();
-        String conditions = request.replaceAll("(?iu).+where", "");
+    private boolean conditionFulfillment(Map<String, Object> row, String curSubCondition) throws Exception {
+        String columnName = getColumn(curSubCondition);
 
-        Matcher conditionsM = Pattern.compile(conditionRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(conditions);
-        Matcher logOpsM = Pattern.compile(logicalOpsRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(conditions);
+        Matcher comparisonOpM = getMatcher(comparisonOpsRgx, curSubCondition);
+        comparisonOpM.find();
+        String comparisonOp = comparisonOpM.group();
 
-        boolean hasLogOps = logOpsM.find();
-        boolean isAnd = hasLogOps && logOpsM.group().equalsIgnoreCase("and");
-
-        while (conditionsM.find()) {
-            String curCondition = conditionsM.group();
-            Matcher columnM = Pattern.compile(columnNameRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(curCondition);
-            columnM.find();
-            String column = columnM.group().substring(1, columnM.end() - 1).toLowerCase();
-
-            validateColumn(column);
-
-            Matcher comparisonOpM = Pattern.compile(comparisonOpsRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(curCondition);
-            comparisonOpM.find();
-            String comparisonOp = comparisonOpM.group();
-
-            IndexesFinder indexesFinder = null;
-
-            if (comparisonOp.matches("!?=")) {
-                String val = getValueFromCondition(curCondition.substring(columnM.end()), columnValueRgx);
-                indexesFinder = (set) -> commonFilter(set, comparisonOp, column, val);
-            } else if (comparisonOp.matches("i?like")) {
-                validateOperatorByColumnType(curCondition, comparisonStringPairRgx, comparisonOp, column);
-
-                String valTemplate = getValueFromCondition(curCondition.substring(columnM.end()), stringValueRgx + "|null");
-                if (valTemplate.charAt(0) == '%') {
-                    valTemplate = ".*" + valTemplate.substring(1);
-                }
-                if (valTemplate.charAt(valTemplate.length() - 1) == '%') {
-                    valTemplate = valTemplate.substring(0, valTemplate.length() - 1) + ".*";
-                }
-                String finalValTemplate = comparisonOp.equalsIgnoreCase("ilike") ? "(?iu)" + valTemplate : valTemplate;
-                System.out.println("finalValTemplate = " + finalValTemplate);
-
-                indexesFinder = (set) -> strFilter(set, column, finalValTemplate);
-
-            } else if (comparisonOp.matches("[><]=?")) {
-                validateOperatorByColumnType(curCondition, comparisonDigitPairRgx, comparisonOp, column);
-                Double val = Double.valueOf(getValueFromCondition(curCondition.substring(columnM.end()), digitValueRgx + "|null"));
-                indexesFinder = (set) -> digitFilter(set, comparisonOp, column, val);
-            }
-
-            assert indexesFinder != null;
-            if (isAnd && !mapIndexesToUpdate.isEmpty()) {
-                HashSet<Integer> mapIndexesToUpdateTemp = new HashSet<>();
-                indexesFinder.find(mapIndexesToUpdateTemp);
-                mapIndexesToUpdate.removeIf(l -> !mapIndexesToUpdateTemp.contains(l));
-            } else {
-                indexesFinder.find(mapIndexesToUpdate);
-            }
-
-        }
-        return mapIndexesToUpdate;
-    }
-
-    private String getValueFromCondition(String condition, String valueRgx) {
-        Matcher valCondM = Pattern.compile(valueRgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(condition);
-        if (!valCondM.find()) {
-            throw new RuntimeException("Не найдено значение для сравнения!");
-        }
-        String valCond = valCondM.group();
-        if (valCond.equals("null")) {
+        Object value = getValue(curSubCondition, columnName);
+        if (value == null) {    //todo могу это контролить на начальном уровне валидации запроса через рв
             throw new RuntimeException("\"null\" не может использоваться в качестве значения для сравнения!");
         }
-        return valCond.replace("'", "");
-    }
 
-    private interface IndexesFinder {
-        void find(HashSet<Integer> indexes);
-    }
+        Object rowValue = row.get(columnName);
+        if (rowValue == null) {
+            return false;
+        }
 
-    private void commonFilter(HashSet<Integer> indexes, String op, String column, String val) {
-        for (int i = 0; i < table.size(); i++) {
-            Map<String, Object> map = table.get(i);
-            Object arg1 = map.get(column);
-            if (arg1 == null && op.equals("!=")) {
-                indexes.add(i);
+        if (comparisonOp.equals("=")) {
+            return rowValue.equals(value);
+        }
+        if (comparisonOp.equals("!=")) {
+            return !rowValue.equals(value);
+        }
+
+        if (comparisonOp.matches("i?like")) {
+            validateOperatorByColumnType(curSubCondition, comparisonStringPairRgx, comparisonOp, columnName);
+            String valueRgx = value.toString();
+            if (valueRgx.charAt(0) == '%') {
+                valueRgx = ".*" + valueRgx.substring(1);
             }
-            if (arg1 != null && op.equals("=") == arg1.toString().equals(val)) {
-                indexes.add(i);
+            if (valueRgx.charAt(valueRgx.length() - 1) == '%') {
+                valueRgx = valueRgx.substring(0, valueRgx.length() - 1) + ".*";
+            }
+            if (comparisonOp.equalsIgnoreCase("ilike")) {
+                valueRgx = "(?iu)" + valueRgx;
+            }
+            return rowValue.toString().matches(valueRgx);
+        }
+
+        if (comparisonOp.matches("[><]=?")) {
+            validateOperatorByColumnType(curSubCondition, comparisonDigitPairRgx, comparisonOp, columnName);
+            boolean isDouble = columnsTypes.get(columnName).getSimpleName().equals("Double");
+            switch (comparisonOp) {
+                case "<":
+                    return isDouble ? (Double) rowValue < (Double) value : (Long) rowValue < (Long) value;
+                case "<=":
+                    return isDouble ? (Double) rowValue <= (Double) value : (Long) rowValue <= (Long) value;
+                case ">":
+                    return isDouble ? (Double) rowValue > (Double) value : (Long) rowValue > (Long) value;
+                case ">=":
+                    return isDouble ? (Double) rowValue >= (Double) value : (Long) rowValue >= (Long) value;
             }
         }
+        return false;
     }
 
-    private void strFilter(HashSet<Integer> indexes, String column, String valRgx) {
-        for (int i = 0; i < table.size(); i++) {
-            Map<String, Object> map = table.get(i);
-            Object arg1 = map.get(column);
-            if (arg1 != null) {
-                String curVal = arg1.toString();
-                if (curVal.substring(1, curVal.length() - 1).matches(valRgx)) {
-                    indexes.add(i);
-                }
-            }
+    private Matcher getMatcher(String rgx, String source) {  //todo сделать пометку в названии или агруметы флагов?
+        return Pattern.compile(rgx, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(source);
+    }
+
+    private String getColumn(String source) throws Exception {
+        Matcher columnM = getMatcher(columnNameRgx, source);
+        columnM.find();
+        String columnName = columnM.group().substring(1, columnM.end() - 1).toLowerCase();
+        validateColumn(columnName);
+        return columnName;
+    }
+
+    private Object getValue(String source, String columnName) throws Exception {
+        source = source.replaceFirst("(?iu)'" + columnName + "'", "");
+        Matcher valueM = getMatcher(columnValueRgx, source);
+        valueM.find();
+        String value = valueM.group();
+        if (value.equals("null")) {
+            return null;
+        }
+        String valueClassName = columnsTypes.get(columnName).getSimpleName();
+        switch (valueClassName) {
+            case "Long":
+                validateValue(longValueRgx, columnName, value);
+                return Long.parseLong(value);
+            case "Double":
+                validateValue(digitValueRgx, columnName, value);
+                return Double.parseDouble(value);
+            case "Boolean":
+                validateValue(boolValueRgx, columnName, value);
+                return Boolean.parseBoolean(value);
+            default:
+                validateValue(stringValueRgx, columnName, value);
+                return value;
         }
     }
 
-    private void digitFilter(HashSet<Integer> indexes, String op, String column, Double val) {
-        for (int i = 0; i < table.size(); i++) {
-            Map<String, Object> map = table.get(i);
-            Object arg1 = map.get(column);
-            if (arg1 != null && applyOperator(op, arg1,
-                    columnsTypes.get(column).getName().equals(Double.class.getName()),  //todo как вытащить класс в преобразование сразу?
-                    val)) {
-                indexes.add(i);
-            }
+    private void validateColumn(String columnName) throws Exception {
+        if (!columnsTypes.containsKey(columnName)) {
+            throw new Exception("Неккоректный запрос - колонки '" + columnName + "' в таблице нет.");
         }
     }
 
-    private boolean applyOperator(String op, Object arg1, boolean isDouble, Double arg2) {
-        switch (op) {
-            case "<":
-                return isDouble ? (Double) arg1 < arg2 : (Long) arg1 < arg2;
-            case "<=":
-                return isDouble ? (Double) arg1 <= arg2 : (Long) arg1 <= arg2;
-            case ">":
-                return isDouble ? (Double) arg1 > arg2 : (Long) arg1 > arg2;
-            case ">=":
-                return isDouble ? (Double) arg1 >= arg2 : (Long) arg1 >= arg2;
-        }
-        throw new RuntimeException("Ошибка определения оператора \"" + op + "\"!");
-    }
-
-    public List<Map<String, Object>> delete(String request) throws Exception {
-        validate(request);
-        List<Map<String, Object>> updatedRows = new ArrayList<>();
-
-        if (hasConditions(request)) {
-            HashSet<Integer> mapIndexesToUpdate = findIndexesToUpdateByConditions(request);
-
-            Iterator<Map<String, Object>> it = table.listIterator();
-            int i = 0;
-            while (it.hasNext()) {
-                Map<String, Object> map = it.next();
-                if (mapIndexesToUpdate.contains(i)) {
-                    updatedRows.add(map);
-                    it.remove();
-                }
-                i++;
-            }
-        } else {
-            updatedRows = table;
-            table.clear();
-        }
-        return updatedRows;
-    }
-
-    public List<Map<String, Object>> select(String request) throws Exception {
-        validate(request);
-
-        List<Map<String, Object>> updatedRows = new ArrayList<>();
-
-        if (hasConditions(request)) {
-            HashSet<Integer> mapIndexesToUpdate = findIndexesToUpdateByConditions(request);
-            for (int i = 0; i < table.size(); i++) {
-                Map<String, Object> map = table.get(i);
-                if (mapIndexesToUpdate.contains(i)) {
-                    updatedRows.add(map);
-                }
-            }
-        } else {
-            updatedRows = table;
-        }
-        return updatedRows;
-    }
-
-    private void validateColumn(String column) throws Exception {
-        if (!columnsTypes.containsKey(column)) {
-            throw new Exception("Неккоректный запрос - колонки '" + column + "' в таблице нет.");
+    private void validateValue(String valueRgx, String columnName, String value) throws Exception {
+        if (!value.matches(valueRgx)) {
+            throw new Exception("Неккоректный запрос - неверный тип значения \"" + value + "\" для колонки '" + columnName + "'");
         }
     }
 
-    private void validateOperatorByColumnType(String curCondition, String pairRgx, String op, String column) throws Exception {
+    private void validateOperatorByColumnType(String curCondition, String pairRgx, String op, String columnName) throws
+            Exception {
         if (!curCondition.matches(pairRgx)) {
-            throw new Exception("Применения оператора \"" + op + "\" недоступно для колонки '" + column + "'.");
+            throw new Exception("Применения оператора \"" + op + "\" недоступно для колонки '" + columnName + "'.");
         }
     }
 
-    private void validate(String request) throws Exception {
-        String regex = null;
-        if (request.matches("\\s*(?iu)INSERT.+")) {
-            regex = "(?iu)\\s*INSERT" + valuesRgx;
-        } else if (request.matches("\\s*(?iu)UPDATE.+")) {
-            regex = "\\s*(?iu)UPDATE" + valuesRgx + whereRgx;
-        } else if (request.matches("\\s*(?iu)DELETE.*")) {
-            regex = "\\s*(?iu)DELETE" + whereRgx;
-        } else if (request.matches("\\s*(?iu)SELECT.*")) {
-            regex = "\\s*(?iu)SELECT" + whereRgx;
-        }
-        if (regex == null || !request.matches(regex)) {
+    private void validateQuery(String query, String regex) throws Exception {
+        if (!query.matches(regex)) {
             System.err.println(regex);
-            if (regex != null) {
-                System.err.println(request.matches(regex));
-            }
-            throw new Exception("Некорректный запрос: " + request);   // todo
+            throw new Exception("Некорректный запрос: " + query);
         }
     }
 
