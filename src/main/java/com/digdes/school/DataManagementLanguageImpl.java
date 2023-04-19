@@ -49,6 +49,24 @@ public class DataManagementLanguageImpl {
         table = new ArrayList<>();
     }
 
+    String getRgx(String name) {
+        if (!name.contains("Rgx")) {
+            System.err.println("Класс не предоставляет доступ к этому полю или же поля с таким именем в классе нет.");
+            return null;
+        }
+        try {
+            Class<?> clazz = this.getClass();
+            Field field = clazz.getDeclaredField(name);
+            return (String) field.get(this);
+        } catch (NoSuchFieldException ex) {
+            System.err.println("Поля с таким именем в классе нет.");
+            return null;
+        } catch (IllegalAccessException e) {
+            System.err.println(e.getMessage());
+            return null;
+        }
+    }
+
     public List<Map<String, Object>> insert(String query) throws Exception {
         validateByRgx(query, insertRgx, exQueryMessage + query);
         Map<String, Object> newRow = getRowWithNewValues(query);
