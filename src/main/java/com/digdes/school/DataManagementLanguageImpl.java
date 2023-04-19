@@ -70,6 +70,9 @@ public class DataManagementLanguageImpl {
     public List<Map<String, Object>> insert(String query) throws Exception {
         validateByRgx(query, insertRgx, exQueryMessage + query);
         Map<String, Object> newRow = getRowWithNewValues(query);
+        if (isAllValuesNull(newRow)) {
+            throw new Exception("Все значенияв новой записи не могут быть пустыми!");
+        }
         table.add(newRow);
         List<Map<String, Object>> insertRes = new ArrayList<>();
         insertRes.add(newRow);
@@ -81,14 +84,23 @@ public class DataManagementLanguageImpl {
 
         List<Map<String, Object>> updatedRows = new ArrayList<>();
         Map<String, Object> newValuesRow = getRowWithNewValues(query);
+        Iterator<Map<String, Object>> it = table.iterator();
+
         if (!hasConditions(query)) {
-            table.forEach(map -> map.putAll(newValuesRow));
+            while (it.hasNext()) {
+                Map<String, Object> row = it.next();
+                row.putAll(newValuesRow);
+                if (isAllValuesNull(row)) {
+                    it.remove();
+                }
+            }
             updatedRows = table;
             return updatedRows;
         }
 
         List<ArrayList<String>> subConditionsListsToSum = conditionDecomposition(query);
-        for (Map<String, Object> row : table) {
+        while (it.hasNext()) {
+            Map<String, Object> row = it.next();
             for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
                 int i;
                 for (i = 0; i < subConditionsList.size(); i++) {
@@ -99,6 +111,9 @@ public class DataManagementLanguageImpl {
                 if (i == subConditionsList.size()) {
                     row.putAll(newValuesRow);
                     updatedRows.add(row);
+                    if (isAllValuesNull(row)) {
+                        it.remove();
+                    }
                 }
             }
         }
@@ -194,6 +209,15 @@ public class DataManagementLanguageImpl {
 
     public void printTable() {
         table.forEach(System.out::println);
+    }
+
+    private boolean isAllValuesNull(Map<String, Object> row) {
+        for (Object value : row.values()) {
+            if (value != null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Map<String, Object> getRowWithNewValues(String query) throws Exception {
