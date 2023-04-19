@@ -1,5 +1,6 @@
 package com.digdes.school;
 
+import java.lang.reflect.Field;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -8,15 +9,15 @@ public class DataManagementLanguageImpl {
 
     private final Map<String, Class<?>> columnsTypes;
     private final List<Map<String, Object>> table;
+    private final String valuesRgx, insertRgx, updateRgx, selectRgx, deleteRgx;
 
-    String insertRgx, updateRgx, selectRgx, deleteRgx;
-    String columnNameRgx, columnValueRgx, pairRgx, valuesRgx, conditionRgx, subConditionRgx;
-    String comparisonPairRgx, comparisonStringPairRgx, comparisonDigitPairRgx;
-    String stringValueRgx, digitValueRgx, longValueRgx, boolValueRgx;
-    String logicalOpsRgx, comparisonOpsRgx;
+    private static final String columnNameRgx, columnValueRgx, pairRgx, conditionRgx, subConditionRgx;
+    private static final String comparisonStringPairRgx, comparisonDigitPairRgx;
+    private static final String stringValueRgx, digitValueRgx, longValueRgx, boolValueRgx;
+    private static final String logicalOpsRgx, comparisonOpsRgx;
+    private static String exQueryMessage = "Некорректный запрос: ";
 
-    {
-
+    static {
         stringValueRgx = "'[^']+'";
         digitValueRgx = "\\d+(\\.\\d+)?";
         longValueRgx = "\\d+";
@@ -29,7 +30,7 @@ public class DataManagementLanguageImpl {
         logicalOpsRgx = "(AND|OR)";
         comparisonOpsRgx = "((=|!=)|i?like|(>|<)=?)";
 
-        comparisonPairRgx = columnNameRgx + "\\s*(=|!=)\\s*" + columnValueRgx;
+        String comparisonPairRgx = columnNameRgx + "\\s*(=|!=)\\s*" + columnValueRgx;
         comparisonStringPairRgx = columnNameRgx + "\\s*i?like\\s*" + stringValueRgx;
         comparisonDigitPairRgx = columnNameRgx + "\\s*(>|<)=?\\s*" + digitValueRgx;
 
@@ -49,7 +50,7 @@ public class DataManagementLanguageImpl {
     }
 
     public List<Map<String, Object>> insert(String query) throws Exception {
-        validateQuery(query, insertRgx);
+        validateByRgx(query, insertRgx, exQueryMessage + query);
         Map<String, Object> newRow = getRowWithNewValues(query);
         table.add(newRow);
         List<Map<String, Object>> insertRes = new ArrayList<>();
@@ -58,7 +59,7 @@ public class DataManagementLanguageImpl {
     }
 
     public List<Map<String, Object>> update(String query) throws Exception {
-        validateQuery(query, updateRgx);
+        validateByRgx(query, updateRgx, exQueryMessage + query);
 
         List<Map<String, Object>> updatedRows = new ArrayList<>();
         Map<String, Object> newValuesRow = getRowWithNewValues(query);
@@ -68,7 +69,7 @@ public class DataManagementLanguageImpl {
             return updatedRows;
         }
 
-        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        List<ArrayList<String>> subConditionsListsToSum = conditionDecomposition(query);
         for (Map<String, Object> row : table) {
             for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
                 int i;
@@ -87,7 +88,7 @@ public class DataManagementLanguageImpl {
     }
 
     public List<Map<String, Object>> delete(String query) throws Exception {
-        validateQuery(query, deleteRgx);
+        validateByRgx(query, deleteRgx, exQueryMessage + query);
         List<Map<String, Object>> deletedRows = new ArrayList<>();
         if (!hasConditions(query)) {
             deletedRows = table;
@@ -95,7 +96,7 @@ public class DataManagementLanguageImpl {
             return deletedRows;
         }
 
-        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        List<ArrayList<String>> subConditionsListsToSum = conditionDecomposition(query);
         ListIterator<Map<String, Object>> it = table.listIterator();
         while (it.hasNext()) {
             Map<String, Object> row = it.next();
@@ -116,13 +117,13 @@ public class DataManagementLanguageImpl {
     }
 
     public List<Map<String, Object>> select(String query) throws Exception {
-        validateQuery(query, selectRgx);
+        validateByRgx(query, selectRgx, exQueryMessage + query);
 
         if (!hasConditions(query)) {
             return table;
         }
         List<Map<String, Object>> selectedRows = new ArrayList<>();
-        List<ArrayList<String>> subConditionsListsToSum = conditionProcess(query);
+        List<ArrayList<String>> subConditionsListsToSum = conditionDecomposition(query);
         for (Map<String, Object> row : table) {
             for (ArrayList<String> subConditionsList : subConditionsListsToSum) {
                 int i;
@@ -139,7 +140,7 @@ public class DataManagementLanguageImpl {
         return selectedRows;
     }
 
-    private List<ArrayList<String>> conditionProcess(String query) {
+    private List<ArrayList<String>> conditionDecomposition(String query) {
         Matcher conditionM = getMatcher(conditionRgx, query);
         conditionM.find();
         String condition = conditionM.group();
@@ -207,7 +208,7 @@ public class DataManagementLanguageImpl {
         String comparisonOp = comparisonOpM.group();
 
         Object value = getValue(curSubCondition, columnName);
-        if (value == null) {    //todo могу это контролить на начальном уровне валидации запроса через рв
+        if (value == null) {
             throw new RuntimeException("\"null\" не может использоваться в качестве значения для сравнения!");
         }
 
@@ -223,8 +224,9 @@ public class DataManagementLanguageImpl {
             return !rowValue.equals(value);
         }
 
+        String exOpMessage = "Применения оператора \"" + comparisonOp + "\" недоступно для колонки '" + columnName + "'.";
         if (comparisonOp.matches("i?like")) {
-            validateOperatorByColumnType(curSubCondition, comparisonStringPairRgx, comparisonOp, columnName);
+            validateByRgx(curSubCondition, comparisonStringPairRgx, exOpMessage);
             String valueRgx = value.toString();
             if (valueRgx.charAt(0) == '%') {
                 valueRgx = ".*" + valueRgx.substring(1);
@@ -239,7 +241,7 @@ public class DataManagementLanguageImpl {
         }
 
         if (comparisonOp.matches("[><]=?")) {
-            validateOperatorByColumnType(curSubCondition, comparisonDigitPairRgx, comparisonOp, columnName);
+            validateByRgx(curSubCondition, comparisonDigitPairRgx, exOpMessage);
             boolean isDouble = columnsTypes.get(columnName).getSimpleName().equals("Double");
             switch (comparisonOp) {
                 case "<":
@@ -276,18 +278,19 @@ public class DataManagementLanguageImpl {
             return null;
         }
         String valueClassName = columnsTypes.get(columnName).getSimpleName();
+        String exValMessage = "Неккоректный запрос - неверный тип значения \"" + value + "\" для колонки '" + columnName + "'";
         switch (valueClassName) {
             case "Long":
-                validateValue(longValueRgx, columnName, value);
+                validateByRgx(value, longValueRgx, exValMessage);
                 return Long.parseLong(value);
             case "Double":
-                validateValue(digitValueRgx, columnName, value);
+                validateByRgx(value, digitValueRgx, exValMessage);
                 return Double.parseDouble(value);
             case "Boolean":
-                validateValue(boolValueRgx, columnName, value);
+                validateByRgx(value, boolValueRgx, exValMessage);
                 return Boolean.parseBoolean(value);
             default:
-                validateValue(stringValueRgx, columnName, value);
+                validateByRgx(value, stringValueRgx, exValMessage);
                 return value;
         }
     }
@@ -298,23 +301,10 @@ public class DataManagementLanguageImpl {
         }
     }
 
-    private void validateValue(String valueRgx, String columnName, String value) throws Exception {
-        if (!value.matches(valueRgx)) {
-            throw new Exception("Неккоректный запрос - неверный тип значения \"" + value + "\" для колонки '" + columnName + "'");
-        }
-    }
-
-    private void validateOperatorByColumnType(String curCondition, String pairRgx, String op, String columnName) throws
-            Exception {
-        if (!curCondition.matches(pairRgx)) {
-            throw new Exception("Применения оператора \"" + op + "\" недоступно для колонки '" + columnName + "'.");
-        }
-    }
-
-    private void validateQuery(String query, String regex) throws Exception {
-        if (!query.matches(regex)) {
-            System.err.println(regex);
-            throw new Exception("Некорректный запрос: " + query);
+    public static void validateByRgx(String str, String regex, String exMessage) throws Exception {
+        if (!str.matches(regex)) {
+            System.err.println("РВ:" + regex);
+            throw new Exception(exMessage);
         }
     }
 
